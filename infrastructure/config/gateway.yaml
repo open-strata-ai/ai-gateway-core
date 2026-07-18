@@ -1,0 +1,30 @@
+# ai-gateway-core configuration fragment (DESIGN §7.4 / §11.5).
+# Rendered by the meta repository per profile; the Go loader ships equivalent
+# typed defaults (see config.go). A JSON overlay may override any key at runtime.
+gateway:
+  listen: "0.0.0.0:8080"
+  upstream: "higress://ai-system"
+
+modelRouting:
+  default: "cloud-qwen-max"
+  fallbackChain:
+    - "cloud-gpt-4o"
+  costAware: true
+
+ratelimit:
+  backend: "redis"
+  defaultQPSPerTenant: 20
+  defaultTPMPerTenant: 200000
+  globalQPS: 0            # 0 = no application-level ceiling (R-003 backstop off)
+
+circuitBreaker:
+  errorThreshold: 0.5
+  cooldownMs: 30000
+
+cache:
+  enabled: false          # optional, default off (R7)
+  semanticThreshold: 0.95
+
+egress:
+  piiScan: true
+  denyEgressTenants: []    # force self-hosted only
