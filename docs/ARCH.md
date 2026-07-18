@@ -1,6 +1,6 @@
 # ai-gateway-core · Architecture (Architecture Overview)
 
-> **Excerpted from** `design/DESIGN.md` §1 Positioning and Boundaries · §2 List of Responsibilities · §3 Core Interface · §6 Adapter
+> **Excerpted from** `docs/DESIGN.md` §1 Positioning and Boundaries · §2 List of Responsibilities · §3 Core Interface · §6 Adapter
 > **Language · Framework**: Go · Hertz/go-zero (hot path) + Gin + Cobra + Wire (compile-time DI)
 > **Field**: runtime (model service layer/AI unified gateway)
 > **optional**: false (core · core required)
@@ -329,5 +329,5 @@ Client(Portal / SDK / CLI) → POST /v1/chat/completions (JWT)
 
 ---
 
-> **Associated documents**: This repository `design/DESIGN.md` · `skills/SKILLS.md` · `specs/SPECS.md`
+> **Associated documents**: This repository `docs/DESIGN.md` · `docs/SKILLS.md` · `docs/SPECS.md`
 > **Architecture Reference**: §4.4.1 (AI Unified Gateway) · §4.4.4–4.4.6 (Model Supply) · §4.7.4 (Basic Risk Control) · §9 (K8s Deployment) · §10.4 (SPI Multiple Implementation) · §10.6 (Component Registry) · §15.5 (DDD Layer/Technology Stack) · §16 (BOM)

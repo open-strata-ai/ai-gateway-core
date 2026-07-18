@@ -7,7 +7,7 @@
 > **Platform version**: v1.0.0
 > **Document Status**: Draft
 > **Responsible Person**: OpenStrata Architecture Group
-> **Associated links**: This repository [arch/ARCH.md](../../arch/ARCH.md) · [skills/SKILLS.md](../../skills/SKILLS.md) · [specs/SPECS.md](../../specs/SPECS.md); Architecture design document §4.4.1–4.4.6 (model supply) · §4.4.1 (AI Unified Gateway) · §4.7.4 (Basic Risk Control Core) · §9 (K8s Deployment) · §10.4 (SPI Multiple Implementation) · §10.6 (Component Registry) · §15.5 (DDD Layer/Technology Stack) · §16 (BOM)
+> **Associated links**: This repository [docs/ARCH.md](../../docs/ARCH.md) · [docs/SKILLS.md](../../docs/SKILLS.md) · [docs/SPECS.md](../../docs/SPECS.md); Architecture design document §4.4.1–4.4.6 (model supply) · §4.4.1 (AI Unified Gateway) · §4.7.4 (Basic Risk Control Core) · §9 (K8s Deployment) · §10.4 (SPI Multiple Implementation) · §10.6 (Component Registry) · §15.5 (DDD Layer/Technology Stack) · §16 (BOM)
 
 ---
 
