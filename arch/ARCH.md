@@ -1,103 +1,103 @@
-# ai-gateway-core · Architecture（架构总览）
+# ai-gateway-core · Architecture (Architecture Overview)
 
-> **摘自** `design/DESIGN.md` §1 定位与边界 · §2 职责清单 · §3 核心接口 · §6 适配器
-> **语言·框架**: Go · Hertz/go-zero（热路径）+ Gin + Cobra + Wire（编译期 DI）
-> **领域**: runtime（模型服务层 / AI 统一网关）
-> **optional**: false（core · 核心必选）
-> **平台版本**: v1.4.0
+> **Excerpted from** `design/DESIGN.md` §1 Positioning and Boundaries · §2 List of Responsibilities · §3 Core Interface · §6 Adapter
+> **Language · Framework**: Go · Hertz/go-zero (hot path) + Gin + Cobra + Wire (compile-time DI)
+> **Field**: runtime (model service layer/AI unified gateway)
+> **optional**: false (core · core required)
+> **Platform version**: v1.4.0
 
 ---
 
-## §1 定位与边界（Scope）
+## §1 Positioning and Boundary (Scope)
 
-### 1.1 一句话定位
+### 1.1 Positioning in one sentence
 
-`ai-gateway-core` 是 OpenStrata 的**数据面入口 + 模型供给中枢**，承载架构 §4.4.1「AI 统一网关」与 §4.4.4–4.4.6「模型供给体系」。它把"对模型能力的调用"收敛为**单一、标准、可治理的入口**，对上层（Agent 引擎、Portal、SDK、CLI）完全屏蔽模型来源差异（第三方 API / 自托管推理）。
+`ai-gateway-core` is the **data plane entrance + model supply center** of OpenStrata, carrying the architecture §4.4.1 "AI Unified Gateway" and §4.4.4–4.4.6 "Model Supply System". It converges "calls to model capabilities" into a single, standard, manageable entrance, and completely shields model source differences (third-party API/self-hosted inference) from the upper layer (Agent engine, Portal, SDK, CLI).
 
-### 1.2 解决的核心问题
+### 1.2 Core Problems Solved
 
-把"N 个模型供应方 × M 种调用协议 × K 类治理诉求（限流/降级/成本/审计）"收敛为一个 **OpenAI-compatible 的、可路由、可熔断、可计量、可审计的统一平面**。
+Converging "N model suppliers × M calling protocols × K types of governance requirements (current limit/downgrade/cost/audit)" into an **OpenAI-compatible, routable, circuit breakerable, measurable, and auditable unified plane**.
 
-### 1.3 必选性与适用场景
+### 1.3 Requirement and Applicable Scenarios
 
-- **必选**: core（核心最小自立组合之一，§4.4.1 / §10.2）
-- **最小场景**: 即便只接第三方 LLM API（阶段一~三），本仓也足以成立
-- **扩展场景**: 阶段四 full 档启用自托管 `SelfHostedAdapter`（vLLM/TGI）
-- **不可关闭**: 本仓是数据面入口，关闭后所有 AI 调用失效
+- **Required**: core (one of the core minimum independent combinations, §4.4.1 / §10.2)
+- **Minimum Scenario**: Even if you only connect to the third-party LLM API (Phases 1~3), this repository is enough to establish
+- **Extended Scenario**: Phase 4 full file enables self-hosted `SelfHostedAdapter` (vLLM/TGI)
+- **Cannot be closed**: This repository is the entrance to the data plane. After closing, all AI calls will become invalid.
 
-### 1.4 架构角色
+### 1.4 Architecture role
 
-| 维度 | 说明 |
+| Dimensions | Description |
 | --- | --- |
-| **层次** | DDD 四层：`domain/`（Port 接口）· `application/`（用例：路由/限流/缓存）· `infrastructure/`（适配器/Wire DI）· `interfaces/`（handler） |
-| **热路径框架** | Hertz（CloudWeGo）或 go-zero，高并发低 GC |
-| **控制面框架** | Gin（管理 API） |
-| **DI 方案** | Wire（编译期依赖注入），零反射开销 |
-| **数据面入口** | Higress（Wasm 插件：JWT 鉴权、全局限流、审计头采集）→ 本仓 handler |
-| **协议承诺** | 对外 OpenAI-compatible，对内 gRPC/HTTP |
+| **Level** | DDD four layers: `domain/` (Port interface) · `application/` (use case: routing/rate limiting/caching) · `infrastructure/` (adapter/Wire DI) · `interfaces/` (handler) |
+| **Hot Path Framework** | Hertz (CloudWeGo) or go-zero, high concurrency and low GC |
+| **Control Plane Framework** | Gin (Management API) |
+| **DI solution** | Wire (compile-time dependency injection), zero reflection overhead |
+| **Data plane entrance** | Higress (Wasm plug-in: JWT authentication, global flow restriction, audit header collection) → this repository handler |
+| **Protocol Commitment** | Externally OpenAI-compatible, internally gRPC/HTTP |
 
-### 1.5 与其他 Go 组件的分工
+### 1.5 Division of labor with other Go components
 
-| 组件 | 关系类型 | 说明 |
+| Component | Relationship Type | Description |
 | --- | --- | --- |
-| `ai-tool-registry` | 请求链路串联 | 网关负责"模型调用"数据面；工具注册/调用由 tool-registry 经 `ToolRegistry` SPI 承载。二者在请求链路中串联（Agent 调网关→网关转发工具→工具再经网关调模型），但职责不重叠。 |
-| `ai-platform-api` | 控制面 vs 数据面 | `ai-platform-api`（Java）是控制面编排 + 租户/用户/计量汇总；网关是**热路径运行时**，不做跨租户结算，只做 `tenant×model` 实时配额/限流与原始计量上报。 |
-| `ai-sandbox-manager` | 独立数据面 | 代码执行（沙箱）是另一条数据面，由 `ai-sandbox-manager` 经 `Sandbox` SPI 承载（§4.3.3），网关不执行代码。 |
-| `ai-cli` | client/server | `aictl` 是调用方，通过本仓暴露的 OpenAI-compatible API / CLI 子命令驱动部署。 |
+| `ai-tool-registry` | Request link concatenation | The gateway is responsible for the "model calling" data plane; tool registration/calling is carried by tool-registry via `ToolRegistry` SPI. The two are connected in series in the request link (Agent adjusts the gateway → gateway forwarding tool → tool then adjusts the model through the gateway), but the responsibilities do not overlap. |
+| `ai-platform-api` | Control plane vs data plane | `ai-platform-api` (Java) is control plane orchestration + tenant/user/metering summary; the gateway is **hot path runtime**, which does not do cross-tenant settlement, only `tenant×model` real-time quota/rate limiting and original metering reporting. |
+| `ai-sandbox-manager` | Independent data plane | Code execution (sandbox) is another data plane, carried by `ai-sandbox-manager` via `Sandbox` SPI (§4.3.3), the gateway does not execute code. |
+| `ai-cli` | client/server | `aictl` is the caller and drives deployment through the OpenAI-compatible API/CLI subcommand exposed by this repository. |
 
-### 1.6 边界约束
+### 1.6 Boundary constraints
 
-| 约束 | 说明 |
+| Constraints | Description |
 | --- | --- |
-| **不跨租户结算** | 仅做实时配额，汇总计费由 `ai-platform-api` + `ai-billing-service` 负责 |
-| **不执行代码** | 代码执行是 `ai-sandbox-manager` 的职责 |
-| **不管理工具** | 工具注册/调用由 `ai-tool-registry` 治理 |
-| **不做模型训练/微调** | 本仓仅做推理路由，训练见 `ai-provisioning-engine` |
+| **No cross-tenant settlement** | Only real-time quotas are used, aggregate billing is handled by `ai-platform-api` + `ai-billing-service` |
+| **No code execution** | Code execution is the responsibility of `ai-sandbox-manager` |
+| **Does not manage tools** | Tool registration/calling is managed by `ai-tool-registry` |
+| **No model training/fine-tuning** | This repository only does inference routing. For training, see `ai-provisioning-engine` |
 
 ---
 
-## §2 职责清单
+## §2 Responsibilities List
 
-### 2.1 完整职责表
+### 2.1 Complete list of responsibilities
 
-| # | 职责 | 必选/可选 | 触发条件 | 说明 |
+| # | Responsibilities | Required/Optional | Trigger conditions | Description |
 | --- | --- | --- | --- | --- |
-| R1 | **OpenAI-compatible API 接入** | core | 每次模型调用请求 | `/v1/chat/completions`、`/v1/embeddings`、`/v1/rerank`、`/v1/models` 等，归一化上游差异（§4.4.1） |
-| R2 | **请求路由 / 模型选择** | core | `ModelRouter.Resolve` 调用 | 按 `default + fallback_chain` 选源，支持 capability 匹配（§4.4.5） |
-| R3 | **限流与配额** | core | 每次请求通过风控后 | `tenant×model` 的 QPS / Token 配额；供应商级限流（§4.4.5、§4.7.4） |
-| R4 | **降级 / 故障转移** | core | 主模型不健康/超时/配额超限 | 降级链顺序切换；配合熔断器（§4.4.5、§4.4.6） |
-| R5 | **成本感知路由** | optional→core（默认开） | `costAware: true` 时 | 高频流量优先自托管、长尾/稀缺补位第三方（§4.4.5） |
-| R6 | **模型目录（ModelCatalog）** | core | 路由决策时查询 | 模型卡片登记：能力/上下文/价格/SLA/健康/租户白名单（§4.4.5） |
-| R7 | **语义/精确缓存** | optional（默认关） | `cache.enabled: true` 时 | Redis Vector Search 语义缓存（§4.3.4） |
-| R8 | **密钥托管与出境管控** | core | 第三方 Provider 调用前 | Provider API Key 存 Vault/K8s Secret，不向租户暴露；PII 脱敏（§4.4.6） |
-| R9 | **基础风控（注入/PII/限流）** | core | 请求进入 handler 后 | 注入检测 + PII 扫描 + 令牌桶限流，默认开（§4.7.4） |
-| R10 | **计量埋点（原始用量上报）** | core | 每次模型调用完成 | Token 输入/输出、调用次数、延迟，异步上报 `ai-billing-service`（§4.7.2） |
-| R11 | **OTel traces + 不可变审计** | core | 每次请求全链路 | 基础可观测性默认开（§4.8） |
+| R1 | **OpenAI-compatible API access** | core | Each model call request | `/v1/chat/completions`, `/v1/embeddings`, `/v1/rerank`, `/v1/models`, etc., normalized upstream difference (§4.4.1) |
+| R2 | **Request routing/model selection** | core | `ModelRouter.Resolve` call | Press `default + fallback_chain` to select source, support capability matching (§4.4.5) |
+| R3 | **Current Limitation and Quota** | core | After each request passes risk control | QPS/Token quota of `tenant×model`; supplier-level current limit (§4.4.5, §4.7.4) |
+| R4 | **Downgrade/Failover** | core | Main model unhealthy/timeout/quota exceeded | Downgrade chain sequence switching; cooperate with circuit breaker (§4.4.5, §4.4.6) |
+| R5 | **Cost-aware routing** | optional→core (default enabled) | `costAware: true` | High-frequency traffic is prioritized for self-hosting, long-tail/scarce filling third party (§4.4.5) |
+| R6 | **ModelCatalog** | core | Query when routing decisions | Model card registration: Capacity/Context/Price/SLA/Health/Tenant Whitelist (§4.4.5) |
+| R7 | **Semantic/Exact Cache** | optional (default off) | `cache.enabled: true` | Redis Vector Search semantic cache (§4.3.4) |
+| R8 | **Key Escrow and Outbound Control** | core | Before calling third-party Provider | Provider API Key stores Vault/K8s Secret and is not exposed to tenants; PII desensitization (§4.4.6) |
+| R9 | **Basic risk control (injection/PII/rate limiting)** | core | After the request enters the handler | Injection detection + PII scanning + token bucket rate limiting, enabled by default (§4.7.4) |
+| R10 | **Metering instrumentation (original usage reporting)** | core | Each model call is completed | Token input/output, number of calls, delay, asynchronous reporting `ai-billing-service` (§4.7.2) |
+| R11 | **OTel traces + immutable audit** | core | Full link for each request | Basic observability is enabled by default (§4.8) |
 
-### 2.2 职责分级
+### 2.2 Responsibility classification
 
-| 级别 | 职责编号 | 数量 | 说明 |
+| Level | Responsibility Number | Quantity | Description |
 | --- | --- | --- | --- |
-| **core（不可关闭）** | R1, R2, R3, R4, R6, R8, R9, R10, R11 | 9 | 网关最小可行集 |
-| **默认开（可配置关）** | R5 | 1 | 成本感知路由（`costAware: true`） |
-| **默认关（optional）** | R7 | 1 | 语义缓存（`cache.enabled: false`） |
+| **core (cannot be closed)** | R1, R2, R3, R4, R6, R8, R9, R10, R11 | 9 | Gateway minimum feasible set |
+| **Default on (configurable off)** | R5 | 1 | Cost-aware routing (`costAware: true`) |
+| **Default off (optional)** | R7 | 1 | Semantic cache (`cache.enabled: false`) |
 
-### 2.3 职责边界
+### 2.3 Responsibility boundaries
 
-- **不包含**: 模型训练、模型评估、数据标注、用户管理、租户结算、代码执行
-- **本仓独占**: 统一协议接入、多 Provider 路由、实时熔断/降级、模型级成本感知
+- **Not included**: model training, model evaluation, data annotation, user management, tenant settlement, code execution
+- **Exclusive to this repository**: unified protocol access, multi-provider routing, real-time circuit breaker/downgrade, model-level cost awareness
 
 ---
 
-## §3 核心接口与抽象
+## §3 Core interface and abstraction
 
-### 3.1 设计原则
+### 3.1 Design principles
 
-领域层（`domain/`）只定义 **Port（接口）**，不依赖具体 Provider。所有上游差异在 Adapter 层（`infrastructure/`）收敛。SPI 版本与 `bom.yaml` `interface_versions` 对齐。本仓遵循 DDD 经典四层架构（§15.6.2）。
+The domain layer (`domain/`) only defines **Port (interface)** and does not rely on specific Provider. All upstream differences converge at the Adapter layer (`infrastructure/`). SPI versions are aligned with `bom.yaml` `interface_versions`. This repository follows the DDD classic four-layer architecture (§15.5.2).
 
 ### 3.2 LLMProvider SPI（v1.0.0）
 
-与来源无关的模型能力抽象，Provider 适配器统一契约。
+Source-independent model capability abstraction, Provider adapter unified contract.
 
 ```go
 // ===== LLMProvider SPI（interface_versions.LLMProvider = 1.0.0）=====
@@ -116,22 +116,22 @@ type Message struct {
 }
 
 type ChatRequest struct {
-    Model         string    `json:"model"`             // 目标 model_id（可经路由改写）
+    Model         string    `json:"model"`             //Target model_id (can be overridden via routing)
     Messages      []Message `json:"messages"`
     Temperature   float32   `json:"temperature,omitempty"`
     MaxTokens     int       `json:"max_tokens,omitempty"`
-    Stream        bool      `json:"stream"`            // SSE 流式
-    TenantID      string    `json:"-"`                 // 由网关中间件注入，不入网
+    Stream        bool      `json:"stream"`            //SSE streaming
+    TenantID      string    `json:"-"`                 //Injected by gateway middleware and not connected to the network
     FallbackChain []string  `json:"-"`                 // AgentSpec.model_binding.fallback_chain
     Capability    string    `json:"-"`                 // chat/embedding/rerank/vision/audio
 }
 
 type ChatResponse struct {
-    Model        string     `json:"model"`             // 实际命中的 model_id
+    Model        string     `json:"model"`             //The model_id of the actual hit
     Content      string     `json:"content"`
     FinishReason string     `json:"finish_reason"`
     Usage        TokenUsage `json:"usage"`
-    RoutedFrom   string     `json:"-"`                 // 命中前的首选 model（用于诊断）
+    RoutedFrom   string     `json:"-"`                 //Preferred model before hit (used for diagnostics)
 }
 
 type TokenUsage struct {
@@ -159,15 +159,15 @@ type LLMProvider interface {
 ### 3.3 ModelRouter Port
 
 ```go
-// ===== 模型路由器 Port（领域层）=====
+//===== Model Router Port (Domain Layer) =====
 type ModelRouter interface {
-    // Resolve 返回本次请求应选中的 provider 实例 + 降级顺序
+    //Resolve returns the provider instance that should be selected for this request + the downgrade order
     Resolve(ctx context.Context, req ChatRequest) RouteDecision
 }
 
 type RouteDecision struct {
     Preferred     string   // model_id
-    FallbackChain []string // 降级链 model_id 列表（按优先级排序）
+    FallbackChain []string //Downgrade chain model_id list (sorted by priority)
     Reason        string   // cost/quota/latency/capability
 }
 ```
@@ -175,26 +175,26 @@ type RouteDecision struct {
 ### 3.4 ModelCatalog Port
 
 ```go
-// ===== 模型目录 Port（领域层）=====
+//===== Model directory Port (domain layer) =====
 type ModelCatalog interface {
     Get(modelID string) (ModelCard, bool)
     ListByCapability(cap string, tenantID string) []ModelCard
     UpdateHealth(modelID string, h HealthStatus)
 }
 
-// 模型卡片（§4.4.5 字段）
+//Model Card (§4.4.5 Field)
 type ModelCard struct {
     ModelID       string    `json:"model_id"`
     Source        string    `json:"source"`          // self_hosted / third_party
     Capability    string    `json:"capability"`      // chat/embedding/rerank/vision/audio
     ContextWindow int       `json:"context_window"`
-    PriceIn       float64   `json:"price_in"`        // 每 1M tokens（自托管按内部折算）
+    PriceIn       float64   `json:"price_in"`        //Every 1M tokens (self-hosted based on internal conversion)
     PriceOut      float64   `json:"price_out"`
     LatencySLA    int       `json:"latency_sla_ms"`
     TPS           int       `json:"tps"`
     RateLimit     RateLimit `json:"rate_limit"`
     Health        string    `json:"health"`          // healthy/degraded/down
-    TenantAccess  []string  `json:"tenant_access"`   // 白名单；空=全租户
+    TenantAccess  []string  `json:"tenant_access"`   //Whitelist; empty = all tenants
 }
 
 type RateLimit struct {
@@ -203,131 +203,131 @@ type RateLimit struct {
 }
 ```
 
-### 3.5 延迟预算约束
+### 3.5 Delay budget constraint
 
-| 处理阶段 | 预算（p95） | 超预算行为 |
+| Processing Phase | Budget (p95) | Over-Budget Behavior |
 | --- | --- | --- |
-| 接入层 + JWT 鉴权 | ≤15ms | WARN trace |
-| 基础风控（注入/PII） | ≤10ms | WARN trace |
-| 缓存查询（optional） | ≤5ms | 未命中走正常链路 |
-| 路由决策 | ≤2ms | WARN trace |
-| 配额/限流（Redis Lua） | ≤3ms | WARN trace |
-| SPI 调用（到第三方） | ≤1800ms | 超阈触发降级 |
-| 计量/审计 | ≤5ms（异步） | 不阻塞主路径 |
-| **端到端 p95** | **≤2000ms** | 与 §4.4.5 降级阈值一致 |
+| Access layer + JWT authentication | ≤15ms | WARN trace |
+| Basic risk control (injection/PII) | ≤10ms | WARN trace |
+| Cache query (optional) | ≤5ms | If not hit, go to the normal link |
+| Routing decision | ≤2ms | WARN trace |
+| Quota/current limit (Redis Lua) | ≤3ms | WARN trace |
+| SPI call (to third party) | ≤1800ms | Over-threshold trigger degradation |
+| Metering/auditing | ≤5ms (asynchronous) | Does not block the main path |
+| **End-to-end p95** | **≤2000ms** | Consistent with §4.4.5 degradation threshold |
 
 ### 3.6 Gateway SPI（v1.2.0）
 
-`Gateway` SPI 由本仓**自身作为实现**暴露给上层。本仓不依赖外部 `Gateway` 实例 —— Higress 是数据面转发层，非 SPI 实现方。
+`Gateway` SPI is exposed to the upper layer by the repository itself as an implementation. This repository does not rely on external `Gateway` instances - Higress is the data plane forwarding layer, not the SPI implementation.
 
 ---
 
-## §6 适配器与 SPI 生态
+## §6 Adapter and SPI Ecosystem
 
-### 6.1 SPI 完整端口矩阵
+### 6.1 SPI complete port matrix
 
-| SPI 端口 | 版本 | 本仓角色 | 外部组件（bom.yaml） | 默认 | 备选 | Adapter 实现 |
+| SPI port | Version | Repository role | External component (bom.yaml) | Default | Alternative | Adapter implementation |
 | --- | --- | --- | --- | --- | --- | --- |
-| `LLMProvider` | 1.0.0 | 消费方 | Qwen/OpenAI/Claude（core）· 自托管 vLLM/TGI（optional） | ✅ | 备选 | `ThirdPartyAdapter` / `SelfHostedAdapter` |
-| `Gateway` | 1.2.0 | 实现方 | Higress（core，数据面） | ✅ | — | 数据面由 Higress 转发，控制逻辑在本仓 |
-| `Auth` | 1.0.0 | 消费方 | Keycloak（core） | ✅ | — | `AuthAdapter`（JWT 本地校验） |
-| `Cache` | 1.0.0 | 消费方 | Redis（core）/ Valkey（optional，OSI 替代） | ✅ | 备选 | `CacheAdapter`（统一缓存接口） |
-| `Tracing` | 1.0.0 | 消费方 | Langfuse（optional）/ OTel（core） | ✅ | 备选 | `TracingAdapter` |
+| `LLMProvider` | 1.0.0 | Consumer | Qwen/OpenAI/Claude (core) · Self-hosted vLLM/TGI (optional) | ✅ | Alternative | `ThirdPartyAdapter` / `SelfHostedAdapter` |
+| `Gateway` | 1.2.0 | Implementer | Higress (core, data plane) | ✅ | — | The data plane is forwarded by Higress, and the control logic is in this repository |
+| `Auth` | 1.0.0 | Consumer | Keycloak (core) | ✅ | — | `AuthAdapter` (JWT local verification) |
+| `Cache` | 1.0.0 | Consumer | Redis (core) / Valkey (optional, OSI replacement) | ✅ | Alternative | `CacheAdapter` (Unified Cache Interface) |
+| `Tracing` | 1.0.0 | Consumer | Langfuse (optional) / OTel (core) | ✅ | Alternative | `TracingAdapter` |
 
-### 6.2 LLMProvider Adapter 详情
+### 6.2 LLMProvider Adapter Details
 
-| Adapter | 适用 Provider | 源协议 | 归一化难度 | 默认状态 | 阶段启用 |
+| Adapter | Applicable Provider | Source Protocol | Normalized Difficulty | Default State | Stage Enabled |
 | --- | --- | --- | --- | --- | --- |
-| `ThirdPartyAdapter (OpenAI)` | OpenAI GPT 系列 | OpenAI Chat Completions API | 低（基准协议） | core 启用 | 阶段一+ |
-| `ThirdPartyAdapter (Claude)` | Anthropic Claude | Anthropic Messages API | 中（messages 格式差异 + system prompt 处理） | core 启用 | 阶段一+ |
-| `ThirdPartyAdapter (Qwen)` | 通义千问 | DashScope API | 中（参数命名映射） | core 启用 | 阶段一+ |
-| `SelfHostedAdapter (vLLM)` | vLLM 自托管推理 | OpenAI-compatible（内部 gRPC/HTTP） | 低 | optional | 阶段四 |
-| `SelfHostedAdapter (TGI)` | HuggingFace TGI | TGI Generate API | 中（需 chat template） | optional | 阶段四 |
+| `ThirdPartyAdapter (OpenAI)` | OpenAI GPT Series | OpenAI Chat Completions API | Low (baseline protocol) | core enabled | Phase 1+ |
+| `ThirdPartyAdapter (Claude)` | Anthropic Claude | Anthropic Messages API | Medium (messages format difference + system prompt processing) | core enabled | Phase 1+ |
+| `ThirdPartyAdapter (Qwen)` | Tongyi Qianwen | DashScope API | Medium (parameter naming mapping) | core enabled | Phase 1+ |
+| `SelfHostedAdapter (vLLM)` | vLLM self-hosted inference | OpenAI-compatible (gRPC/HTTP internally) | Low | optional | Phase 4 |
+| `SelfHostedAdapter (TGI)` | HuggingFace TGI | TGI Generate API | Medium (requires chat template) | optional | Phase 4 |
 
-### 6.3 防腐层设计（ACL）
+### 6.3 Anti-corrosion layer design (ACL)
 
-每个 Adapter 承担协议归一职责，保证领域层纯净：
+Each Adapter assumes the responsibility of protocol normalization and ensures the purity of the domain layer:
 
-- **Claude Adapter**: messages 数组格式 → 内部 `[]Message`；system prompt 独立注入 vs 首条消息区分
-- **Qwen Adapter**: DashScope 参数命名（`top_p` / `repetition_penalty`）→ 内部标准字段
-- **OpenAI Adapter**: 基准协议，最小覆盖（直接映射）
-- **vLLM Adapter**: 内网直连（gRPC/HTTP），加连接池管理
-- **TGI Adapter**: chat template 层包装 + `generate_stream` SSE 解析
+- **Claude Adapter**: messages array format → internal `[]Message`; system prompt independent injection vs first message distinction
+- **Qwen Adapter**: DashScope parameter naming (`top_p` / `repetition_penalty`) → internal standard field
+- **OpenAI Adapter**: Baseline protocol, minimal coverage (direct mapping)
+- **vLLM Adapter**: Intranet direct connection (gRPC/HTTP), plus connection pool management
+- **TGI Adapter**: chat template layer packaging + `generate_stream` SSE parsing
 
-### 6.4 连接池与资源管理
+### 6.4 Connection pool and resource management
 
-每个 Provider Adapter 维持独立连接池：
+Each Provider Adapter maintains an independent connection pool:
 
 - HTTP: `MaxConnsPerHost: 100`、`MaxIdleConns: 50`、IdleTimeout 60s
 - gRPC: `MaxConcurrentStreams` + connection keepalive
-- 熔断期间已断开连接从池中剔除
-- 定期健康探测回写 `ModelCatalog.UpdateHealth`
+- Connections that have been disconnected during circuit breaker are removed from the pool
+- Regular health detection writeback `ModelCatalog.UpdateHealth`
 
-### 6.5 同类多实现并存原则
+### 6.5 Principle of coexistence of multiple implementations of the same type
 
-`LLMProvider` 背后可同时在线多个 Adapter（§10.4）：
+Multiple Adapters can be online at the same time behind `LLMProvider` (§10.4):
 
-- `ModelRouter` 按请求/租户/能力路由到不同 Adapter
-- 熔断隔离: 每 Provider 实例独立熔断器，一个 Provider 故障不影响其他
-- 成本感知路由: 高频流量优先自托管 Adapter，长尾补位第三方 Adapter
-- 灰度上新: 新模型 5% 流量灰度（切分点在 ModelRouter，待与 `ai-platform-api` 对齐）
+- `ModelRouter` routes to different Adapters based on request/tenant/capability
+- Circuit breaker isolation: Each Provider instance has an independent circuit breaker, and the failure of one Provider does not affect other
+- Cost-aware routing: High-frequency traffic prioritizes self-hosted Adapters, and long-tail supplements third-party Adapters.
+- Canary update: 5% canary traffic of the new model (the split point is at ModelRouter, to be aligned with `ai-platform-api`)
 
-### 6.6 Higress 协作切分
+### 6.6 Higress collaborative segmentation
 
-| 职责 | 所在层 | 说明 |
+| Responsibilities | Level | Description |
 | --- | --- | --- |
-| JWT 鉴权 | Higress Wasm | 轻量前置，减少无效请求进入网关 |
-| 全局并发限流 | Higress Wasm | 全局限流，防止雪崩 |
-| 审计头采集 | Higress Wasm | 请求头元信息采集 |
-| 路由决策 | ai-gateway-core | 模型选择、降级链 |
-| 熔断/降级 | ai-gateway-core | 业务逻辑不可下沉 |
-| 协议归一 | ai-gateway-core Adapter | Provider 差异收敛 |
+| JWT authentication | Higress Wasm | Lightweight front-end to reduce invalid requests entering the gateway |
+| Global concurrent current limit | Higress Wasm | Global current limit to prevent avalanches |
+| Audit header collection | Higress Wasm | Request header information collection |
+| Routing decision | ai-gateway-core | Model selection, degradation chain |
+| Circuit breaker/downgrade | ai-gateway-core | Business logic cannot be sunk |
+| Protocol normalization | ai-gateway-core Adapter | Provider differential convergence |
 
-### 6.7 SPI 版本对齐与一致性
+### 6.7 SPI version alignment and consistency
 
-| 一致性报告项 | bom.yaml 版本 | 本仓实现版本 | 状态 |
+| Consistency report item | bom.yaml version | This repository implementation version | Status |
 | --- | --- | --- | --- |
-| `LLMProvider` | `1.0.0` | `1.0.0` | 对齐 |
-| `Gateway` | `1.2.0` | `1.2.0` | 对齐（D3 已修正 `ModelGateway→Gateway`） |
-| `Auth` | `1.0.0` | `1.0.0` | 对齐 |
-| `Cache` | `1.0.0` | `1.0.0` | 对齐 |
-| `Tracing` | `1.0.0` | `1.0.0` | 对齐 |
+| `LLMProvider` | `1.0.0` | `1.0.0` | Alignment |
+| `Gateway` | `1.2.0` | `1.2.0` | Alignment (D3 fixed `ModelGateway→Gateway`) |
+| `Auth` | `1.0.0` | `1.0.0` | Alignment |
+| `Cache` | `1.0.0` | `1.0.0` | Alignment |
+| `Tracing` | `1.0.0` | `1.0.0` | Alignment |
 
-### 6.8 阶段引入矩阵
+### 6.8 Stage introduction matrix
 
-| 阶段 | 配置档 | 启用 Adapter |
+| Stage | Profile | Enable Adapter |
 | --- | --- | --- |
-| 一~三 | starter / standard | `ThirdPartyAdapter`（OpenAI + Qwen + Claude）+ `AuthAdapter` + `CacheAdapter` + `TracingAdapter`（OTel only） |
-| 四 | advanced / full | + `SelfHostedAdapter`（vLLM/TGI）+ Langfuse + Valkey（备选 Cache） |
+| 1~3 | starter / standard | `ThirdPartyAdapter` (OpenAI + Qwen + Claude) + `AuthAdapter` + `CacheAdapter` + `TracingAdapter` (OTel only) |
+| Four | advanced / full | + `SelfHostedAdapter` (vLLM/TGI) + Langfuse + Valkey (alternative Cache) |
 
-不启用的 Adapter 通过 Wire DI 编译期排除，零运行时开销。
+Unenabled Adapters are eliminated at compile time via Wire DI, with zero runtime overhead.
 
 ---
 
-## 请求路径全景
+## Request path panorama
 
 ```
 Client(Portal / SDK / CLI) → POST /v1/chat/completions (JWT)
-  → Higress 数据面（Wasm 插件: JWT 鉴权 / 全局限流 / 审计头采集）
-    → ai-gateway-core 接入层 handler [Hertz/go-zero]
-      → 租户上下文解析（Keycloak JWT → tenant_id / role）
-        → 基础风控: 注入攻击扫描 + PII 检测 + 令牌桶限流
-          → [拦截] → 4xx + 审计日志
-          → [放行] → 缓存查询（语义/精确，optional，Redis Vector Search）
-            → [命中] → 直接返回缓存响应（≤5ms）
-            → [未命中] → ModelRouter.Resolve（路由决策: default + fallback + costAware）
-              → 租户×模型配额/限流检查（Redis Lua 原子扣减）
-                → [超额] → 429 或降级到备选模型
-                → [通过] → LLMProvider.Chat / ChatStream（经 Adapter → 第三方 API / 自托管推理）
-                  → 熔断保护: 错误率超阈 50% → 冷却 30s → 半开探活
-                    → [主模型失败] → 按 fallback_chain 顺序重试下一个
-                    → [全部失败] → 5xx + 上报 + 审计
-                    → [成功] → 计量埋点（异步上报 ai-billing-service）
-                      → 审计（PostgreSQL append-only）+ OTel trace
-                        → 流式/非流式响应 → Higress → Client
+  → Higress Data plane（Wasm plug-in: JWT Authentication / Global throttling / Audit header collection）
+    → ai-gateway-core access layer handler [Hertz/go-zero]
+      → Tenant context resolution（Keycloak JWT → tenant_id / role）
+        → Basic risk control: Injection attack scan + PII Detection + Token bucket current limit
+          → [intercept] → 4xx + Audit log
+          → [release] → cache query（Semantics/accurate，optional，Redis Vector Search）
+            → [hit] → Return cached response directly（≤5ms）
+            → [miss] → ModelRouter.Resolve（routing decisions: default + fallback + costAware）
+              → tenant×Model quota/Current limit check（Redis Lua Atomic deduction）
+                → [excess] → 429 or downgrade to an alternative model
+                → [pass] → LLMProvider.Chat / ChatStream（through Adapter → third party API / self-hosted inference）
+                  → Circuit breaker protection: Error rate exceeds threshold 50% → cool down 30s → Half-exploration
+                    → [Master model failed] → according to fallback_chain Retry the next one in sequence
+                    → [All failed] → 5xx + Report + audit
+                    → [success] → Measurement instrumentation（Asynchronous reporting ai-billing-service）
+                      → audit（PostgreSQL append-only）+ OTel trace
+                        → streaming/non-streaming response → Higress → Client
 ```
 
 ---
 
-> **关联文档**: 本仓 `design/DESIGN.md` · `skills/SKILLS.md` · `specs/SPECS.md`
-> **架构引用**: §4.4.1（AI统一网关）· §4.4.4–4.4.6（模型供给）· §4.7.4（基础风控）· §9（K8s 部署）· §10.4（SPI多实现）· §10.6（Component Registry）· §15.6（DDD分层/技术栈）· §16（BOM）
+> **Associated documents**: This repository `design/DESIGN.md` · `skills/SKILLS.md` · `specs/SPECS.md`
+> **Architecture Reference**: §4.4.1 (AI Unified Gateway) · §4.4.4–4.4.6 (Model Supply) · §4.7.4 (Basic Risk Control) · §9 (K8s Deployment) · §10.4 (SPI Multiple Implementation) · §10.6 (Component Registry) · §15.5 (DDD Layer/Technology Stack) · §16 (BOM)

@@ -1,29 +1,29 @@
 # ai-gateway-core · Specifications
 
-> **规格层** — API/CLI 接口面、数据模型、部署配置
-> **源文档**: design/DESIGN.md §7 / §8 / §11
-> **平台版本**: v1.4.0
+> **Specification layer** — API/CLI interface, data model, deployment configuration
+> **Source document**: design/DESIGN.md §7 / ​​§8 / §11
+> **Platform version**: v1.4.0
 
 ---
 
-## 7. API / CLI 接口面
+## 7. API / CLI interface
 
-### 7.1 对外 HTTP API（OpenAI-compatible）
+### 7.1 External HTTP API (OpenAI-compatible)
 
-经 Higress 数据面暴露：
+Exposed via Higress data plane:
 
-| 方法 | 路径 | 说明 | Stream | 鉴权 |
+| Method | Path | Description | Stream | Authentication |
 | --- | --- | --- | --- | --- |
-| POST | `/v1/chat/completions` | 对话补全 | 支持 SSE | Keycloak JWT |
-| POST | `/v1/embeddings` | 向量化文本 | 否 | Keycloak JWT |
-| POST | `/v1/rerank` | 重排序 | 否 | Keycloak JWT |
-| GET | `/v1/models` | 列出租户可见 model_id | 否 | Keycloak JWT |
-| GET | `/v1/healthz` | 存活探针 | 否 | 无 |
-| GET | `/metrics` | Prometheus 指标 | 否 | 内网 |
+| POST | `/v1/chat/completions` | Conversation completion | SSE supported | Keycloak JWT |
+| POST | `/v1/embeddings` | Vectorized text | No | Keycloak JWT |
+| POST | `/v1/rerank` | Rerank | No | Keycloak JWT |
+| GET | `/v1/models` | List tenant-visible model_id | No | Keycloak JWT |
+| GET | `/v1/healthz` | Liveness probe | NO | None |
+| GET | `/metrics` | Prometheus metrics | No | Intranet |
 
-#### Chat Completions 请求/响应模型
+#### Chat Completions request/response model
 
-**请求体 (JSON)**:
+**Request body (JSON)**:
 ```json
 {
   "model": "cloud-qwen-max",
@@ -37,7 +37,7 @@
 }
 ```
 
-**非流式响应体 (JSON)**:
+**Non-streaming response body (JSON)**:
 ```json
 {
   "model": "cloud-qwen-max",
@@ -51,7 +51,7 @@
 }
 ```
 
-**流式响应体 (SSE)**:
+**Streaming Response Body (SSE)**:
 ```
 data: {"delta": "Docker", "done": false}
 data: {"delta": " is", "done": false}
@@ -59,33 +59,33 @@ data: {"delta": " is", "done": false}
 data: {"delta": "", "usage": {"prompt_tokens": 42, "completion_tokens": 128}, "done": true}
 ```
 
-### 7.2 内部/管控 API
+### 7.2 Internal/Control API
 
-| 方法 | 路径 | 说明 | 协议 | 鉴权 |
+| Method | Path | Description | Protocol | Authentication |
 | --- | --- | --- | --- | --- |
-| GET | `/internal/catalog/models` | 模型目录管理 | gRPC/HTTP | 内网 |
-| POST | `/internal/routing/policy` | 路由策略下发 | gRPC/HTTP | 内网 |
-| PUT | `/internal/provider/{id}/health` | 探活回写 | HTTP | 内网 |
-| POST | `/internal/metering/report` | 计量聚合（对接 billing） | gRPC | 内网 |
-| GET | `/internal/ready` | 就绪探针（校验 PG/Redis/至少一个 provider healthy） | HTTP | 内网 |
+| GET | `/internal/catalog/models` | Model catalog management | gRPC/HTTP | Intranet |
+| POST | `/internal/routing/policy` | Routing policy delivery | gRPC/HTTP | Intranet |
+| PUT | `/internal/provider/{id}/health` | Exploring writeback | HTTP | Intranet |
+| POST | `/internal/metering/report` | Metering aggregation (connected to billing) | gRPC | Intranet |
+| GET | `/internal/ready` | Readiness probe (verify that PG/Redis/at least one provider is healthy) | HTTP | Intranet |
 
 ### 7.3 CLI
 
-`ai-gateway-core` 自身不发布 CLI；平台级 CLI 见 `ai-cli`（`aictl`）。运维可用 `--config` 启动参数。
+`ai-gateway-core` does not publish a CLI itself; see `ai-cli` (`aictl`) for platform-level CLI. The `--config` startup parameter can be used for operation and maintenance.
 
 ---
 
-## 8. 数据模型
+## 8. Data model
 
-### 8.1 持久化存储
+### 8.1 Persistent storage
 
-| 存储 | 角色 | 数据内容 |
+| Storage | Role | Data Content |
 | --- | --- | --- |
-| PostgreSQL（core） | 权威存储 | `model_catalog`（模型卡片）、`routing_policy`（租户路由策略）、`tenant_entitlement`（模型白名单）、`audit_log`（不可变审计） |
-| Redis（core） | 热数据 | 限流计数器（QPS/TPM 滑动窗口）、语义缓存向量、路由表热副本、熔断状态 |
-| Valkey（optional） | OSI 替代 Redis | 同 Redis，by bom.yaml `Cache` |
+| PostgreSQL (core) | Authoritative storage | `model_catalog` (model card), `routing_policy` (tenant routing policy), `tenant_entitlement` (model whitelist), `audit_log` (immutable audit) |
+| Redis (core) | Hot data | Current limit counter (QPS/TPM sliding window), semantic cache vector, routing table hot copy, circuit breaker status |
+| Valkey (optional) | OSI replacement for Redis | Same as Redis, by bom.yaml `Cache` |
 
-### 8.2 核心表: `model_catalog`
+### 8.2 Core table: `model_catalog`
 
 ```sql
 CREATE TABLE model_catalog (
@@ -99,51 +99,51 @@ CREATE TABLE model_catalog (
   tps            INT,                  -- tokens per second
   rate_limit     JSONB,                -- {"qps_per_tenant": N, "tpm_per_tenant": N}
   health         TEXT DEFAULT 'healthy', -- 'healthy'|'degraded'|'down'
-  tenant_access  JSONB DEFAULT '[]'    -- 白名单；空=全租户
+  tenant_access  JSONB DEFAULT '[]'    -- whitelist；null=fully tenanted
 );
 ```
 
-**列说明**:
+**Column Description**:
 
-| 列 | 类型 | 约束 | 说明 |
+| Column | Type | Constraint | Description |
 | --- | --- | --- | --- |
-| model_id | TEXT | PK | 模型唯一标识，如 `cloud-qwen-max` |
-| source | TEXT | NOT NULL | `self_hosted` 或 `third_party` |
+| model_id | TEXT | PK | The unique identifier of the model, such as `cloud-qwen-max` |
+| source | TEXT | NOT NULL | `self_hosted` or `third_party` |
 | capability | TEXT | NOT NULL | `chat`/`embedding`/`rerank`/`vision`/`audio` |
-| context_window | INT | | 最大上下文 token 数 |
-| price_in | NUMERIC | | 输入价格（每 1M tokens） |
-| price_out | NUMERIC | | 输出价格（每 1M tokens） |
-| latency_sla_ms | INT | | SLA 延迟上限 |
-| tps | INT | | 吞吐量 tokens/second |
+| context_window | INT | | Maximum number of context tokens |
+| price_in | NUMERIC | | Enter price (per 1M tokens) |
+| price_out | NUMERIC | | Output price (per 1M tokens) |
+| latency_sla_ms | INT | | SLA latency cap |
+| tps | INT | | Throughput tokens/second |
 | rate_limit | JSONB | | `{qps_per_tenant, tpm_per_tenant}` |
-| health | TEXT | 'healthy' | 健康状态 |
-| tenant_access | JSONB | '[]' | 租户白名单 |
+| health | TEXT | 'healthy' | health status |
+| tenant_access | JSONB | '[]' | Tenant whitelist |
 
-### 8.3 Redis 键设计
+### 8.3 Redis key design
 
-| Key Pattern | 用途 | TTL |
+| Key Pattern | Purpose | TTL |
 | --- | --- | --- |
-| `ratelimit:{tenant}:{model}:qps` | QPS 令牌桶计数 | 1s |
-| `ratelimit:{tenant}:{model}:tpm` | TPM 滑动窗口 | 60s |
-| `cache:semantic:{embedding_hash}` | 语义缓存响应 | 3600s |
-| `router:table` | 路由表热副本 | 无（实时同步） |
-| `circuit:{provider}` | 熔断器状态 | 与冷却窗口一致 |
+| `ratelimit:{tenant}:{model}:qps` | QPS token bucket count | 1s |
+| `ratelimit:{tenant}:{model}:tpm` | TPM sliding window | 60s |
+| `cache:semantic:{embedding_hash}` | Semantic cache response | 3600s |
+| `router:table` | Hot copy of routing table | None (real-time synchronization) |
+| `circuit:{provider}` | circuit breaker status | consistent with cooling window |
 
 ---
 
-## 11. 配置与部署
+## 11. Configuration and deployment
 
-### 11.1 部署形态
+### 11.1 Deployment form
 
-| 属性 | 值 |
+| Properties | Values ​​|
 | --- | --- |
-| 必选性 | core（非 optional） |
-| 命名空间 | `ai-system`（§9.2） |
-| 部署方式 | Docker Compose（starter）/ K8s Deployment（standard） |
-| 镜像 | 单二进制（`cmd/` + Wire 装配） |
-| GPU 需求 | 否（自托管推理 vLLM 解耦到 GPU 节点组） |
+| Required | core (not optional) |
+| namespace | `ai-system` (§9.2) |
+| Deployment method | Docker Compose (starter)/K8s Deployment (standard) |
+| Mirror | Single binary (`cmd/` + Wire assembly) |
+| GPU Requirements | No (self-hosted inference vLLM decoupled to GPU node group) |
 
-### 11.2 K8s 资源配置
+### 11.2 K8s resource configuration
 
 ```yaml
 resources:
@@ -155,14 +155,14 @@ resources:
     memory: 2Gi
 ```
 
-### 11.3 探针配置
+### 11.3 Probe configuration
 
-| 探针 | 路径 | 说明 | initialDelaySeconds | periodSeconds |
+| probe | path | description | initialDelaySeconds | periodSeconds |
 | --- | --- | --- | --- | --- |
-| 存活 | `GET /v1/healthz` | 快速返回 200 | 5 | 10 |
-| 就绪 | `GET /internal/ready` | 校验 PG + Redis + ≥1 provider healthy | 5 | 10 |
+| Alive | `GET /v1/healthz` | Quick return 200 | 5 | 10 |
+| Ready | `GET /internal/ready` | Verify PG + Redis + ≥1 provider healthy | 5 | 10 |
 
-### 11.4 滚动更新策略
+### 11.4 Rolling update strategy
 
 ```yaml
 strategy:
@@ -172,83 +172,83 @@ strategy:
     maxUnavailable: 0
 ```
 
-### 11.5 配置键完整列表
+### 11.5 Complete list of configuration keys
 
-**文件位置**: `infrastructure/config/`
+**File location**: `infrastructure/config/`
 
 ```yaml
 gateway:
-  listen: "0.0.0.0:8080"           # 监听地址
-  upstream: "higress://ai-system"   # 上游转发目标
+  listen: "0.0.0.0:8080"           #listening address
+  upstream: "higress://ai-system" # upstream forwarding target
 
 modelRouting:
-  default: "cloud-qwen-max"         # 默认模型
-  fallbackChain:                     # 降级链
+  default: "cloud-qwen-max"         #Default model
+  fallbackChain:                     #Downgrade chain
     - "cloud-gpt-4o"
-  costAware: true                    # 成本感知路由
+  costAware: true                    #cost aware routing
 
 ratelimit:
-  backend: "redis"                   # 限流后端
-  defaultQPSPerTenant: 20            # 默认每租户 QPS
-  defaultTPMPerTenant: 200000        # 默认每租户 TPM
+  backend: "redis"                   #Rate limiting backend
+  defaultQPSPerTenant: 20            #Default QPS per tenant
+  defaultTPMPerTenant: 200000        #Default per-tenant TPM
 
 circuitBreaker:
-  errorThreshold: 0.5                # 错误率阈值
-  cooldownMs: 30000                  # 冷却窗口 ms
+  errorThreshold: 0.5                #error rate threshold
+  cooldownMs: 30000                  #Cooling window ms
 
 cache:
-  enabled: false                     # 语义缓存开关
-  semanticThreshold: 0.95            # 相似度阈值
+  enabled: false                     #Semantic caching switch
+  semanticThreshold: 0.95            #similarity threshold
 
 egress:
-  piiScan: true                      # PII 扫描开关
-  denyEgressTenants: []              # 强制自托管租户列表
+  piiScan: true                      #PII scan switch
+  denyEgressTenants: []              #Force self-hosted tenant list
 ```
 
-**配置键说明**:
+**Configuration key description**:
 
-| 键 | 类型 | 默认值 | 说明 |
+| key | type | default value | description |
 | --- | --- | --- | --- |
-| `gateway.listen` | string | `0.0.0.0:8080` | 服务监听地址 |
-| `gateway.upstream` | string | `higress://ai-system` | Higress 上游地址 |
-| `modelRouting.default` | string | `cloud-qwen-max` | 默认路由模型 |
-| `modelRouting.fallbackChain` | []string | `[cloud-gpt-4o]` | 降级链 model_id 列表 |
-| `modelRouting.costAware` | bool | `true` | 是否启用成本感知路由 |
-| `ratelimit.backend` | string | `redis` | 限流实现后端 |
-| `ratelimit.defaultQPSPerTenant` | int | `20` | 每租户默认 QPS |
-| `ratelimit.defaultTPMPerTenant` | int | `200000` | 每租户默认 TPM |
-| `circuitBreaker.errorThreshold` | float | `0.5` | 熔断错误率阈值 |
-| `circuitBreaker.cooldownMs` | int | `30000` | 熔断冷却时间（毫秒） |
-| `cache.enabled` | bool | `false` | 启用语义缓存 |
-| `cache.semanticThreshold` | float | `0.95` | 语义缓存命中相似度阈值 |
-| `egress.piiScan` | bool | `true` | 出境前 PII 脱敏 |
-| `egress.denyEgressTenants` | []string | `[]` | 禁止出境的租户列表 |
+| `gateway.listen` | string | `0.0.0.0:8080` | Service listening address |
+| `gateway.upstream` | string | `higress://ai-system` | Higress upstream address |
+| `modelRouting.default` | string | `cloud-qwen-max` | Default routing model |
+| `modelRouting.fallbackChain` | []string | `[cloud-gpt-4o]` | Fallback chain model_id list |
+| `modelRouting.costAware` | bool | `true` | Whether to enable cost-aware routing |
+| `ratelimit.backend` | string | `redis` | Rate limiting implementation backend |
+| `ratelimit.defaultQPSPerTenant` | int | `20` | Default QPS per tenant |
+| `ratelimit.defaultTPMPerTenant` | int | `200000` | Per-tenant default TPM |
+| `circuitBreaker.errorThreshold` | float | `0.5` | circuit breaker error rate threshold |
+| `circuitBreaker.cooldownMs` | int | `30000` | Circuit break cooling time (milliseconds) |
+| `cache.enabled` | bool | `false` | Enable semantic caching |
+| `cache.semanticThreshold` | float | `0.95` | Semantic cache hit similarity threshold |
+| `egress.piiScan` | bool | `true` | Pre-exit PII desensitization |
+| `egress.denyEgressTenants` | []string | `[]` | List of tenants prohibited from leaving the country |
 
-### 11.6 阶段引入策略
+### 11.6 Stage introduction strategy
 
-| 阶段 | 组件 | 配置状态 |
+| Stages | Components | Configuration Status |
 | --- | --- | --- |
-| 一~三（starter/standard） | core | 全部 core 功能开启；自托管 Adapter 关闭 |
-| 四（advanced/full） | core + SelfHostedAdapter | `SelfHostedAdapter` 由 profiles `optional_disabled` 控制启用 |
+| One to three (starter/standard) | core | All core functions are enabled; self-hosted Adapter is disabled |
+| Four (advanced/full) | core + SelfHostedAdapter | `SelfHostedAdapter` is enabled by profiles `optional_disabled` control |
 
-### 11.7 依赖组件
+### 11.7 Dependent components
 
-| 组件 | 类型 | 必选 | 说明 |
+| Component | Type | Required | Description |
 | --- | --- | --- | --- |
-| Higress | 数据面 | core | Wasm 插件: 鉴权/限流/审计 |
-| Keycloak | 认证 | core | JWT 签发与校验 |
-| PostgreSQL | 存储 | core | 模型目录/路由策略/审计 |
-| Redis | 缓存/计数 | core | 限流/缓存/路由热副本 |
-| Vault | 密钥管理 | core | Provider API Key 托管 |
+| Higress | Data plane | core | Wasm plug-in: authentication/rate limiting/auditing |
+| Keycloak | Authentication | core | JWT issuance and verification |
+| PostgreSQL | storage | core | model directory/routing policy/auditing |
+| Redis | cache/counting | core | rate limiting/caching/routing hot copy |
+| Vault | Key management | core | Provider API Key hosting |
 
 ---
 
-## 追溯矩阵
+## Traceability matrix
 
-| 章节 | 源文档 DESIGN.md 对应 |
+| Chapter | Source document DESIGN.md corresponding |
 | --- | --- |
-| 7 API/CLI/配置接口面 | §7 |
-| 8 数据模型与存储 | §8 |
-| 11 配置与部署 | §11 |
+| 7 API/CLI/Configuration Interface | §7 |
+| 8 Data Model and Storage | §8 |
+| 11 Configuration and Deployment | §11 |
 
-> **变更记录**: v0.1 | 2026-07-17 | 初稿（从 DESIGN.md §7/§8/§11 提取）
+> **Change Record**: v0.1 | 2026-07-17 | First draft (extracted from DESIGN.md §7/§8/§11)
