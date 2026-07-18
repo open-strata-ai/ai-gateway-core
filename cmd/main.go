@@ -52,7 +52,25 @@ func main() {
 // Bootstrap assembles the full object graph from config and returns the HTTP
 // handler plus a cleanup function. It is exported so tests can reuse the wiring.
 func Bootstrap(cfg config.Config) (*httpapi.Handler, func()) {
-	cat := catalog.NewWithCards(defaultCards()...)
+	pgDSN := os.Getenv("DATABASE_URL")
+	var cat domain.ModelCatalog
+	if pgDSN != "" {
+		pgcat, err := catalog.NewPostgres(pgDSN)
+		if err != nil {
+			log.Printf("WARN: falling back to in-memory catalog (%v)", err)
+			cat = catalog.NewWithCards(defaultCards()...)
+		} else {
+			cat = pgcat
+			// Seed default cards if catalog is empty
+			if cards := cat.ListByCapability("", ""); len(cards) == 0 {
+				for _, card := range defaultCards() {
+					cat.Upsert(card)
+				}
+			}
+		}
+	} else {
+		cat = catalog.NewWithCards(defaultCards()...)
+	}
 
 	reg := provider.NewRegistry()
 	for _, card := range defaultCards() {
@@ -82,7 +100,18 @@ func Bootstrap(cfg config.Config) (*httpapi.Handler, func()) {
 	})
 	risk := riskcontrol.New(riskcontrol.Config{PIIScan: cfg.Egress.PIIScan})
 	c := cache.New(cfg.Cache.Enabled)
-	aud := audit.New()
+	var aud domain.AuditRecorder
+	if pgDSN != "" {
+		pgaud, err := audit.NewPostgres(pgDSN)
+		if err != nil {
+			log.Printf("WARN: falling back to in-memory audit (%v)", err)
+			aud = audit.New()
+		} else {
+			aud = pgaud
+		}
+	} else {
+		aud = audit.New()
+	}
 	trc := tracing.New(false)
 	rep := appmetering.New(1024, metering.LogSink())
 
