@@ -4,7 +4,7 @@
 > **Language · Framework**: Go · Hertz/go-zero (hot path) + Gin + Cobra + Wire (compile-time DI)
 > **Field**: runtime (model service layer/AI unified gateway)
 > **optional**: false (required for core · core)
-> **Platform version**: v1.4.0
+> **Platform version**: v1.0.0
 > **Document Status**: Draft
 > **Responsible Person**: OpenStrata Architecture Group
 > **Associated links**: This repository [arch/ARCH.md](../../arch/ARCH.md) · [skills/SKILLS.md](../../skills/SKILLS.md) · [specs/SPECS.md](../../specs/SPECS.md); Architecture design document §4.4.1–4.4.6 (model supply) · §4.4.1 (AI Unified Gateway) · §4.7.4 (Basic Risk Control Core) · §9 (K8s Deployment) · §10.4 (SPI Multiple Implementation) · §10.6 (Component Registry) · §15.5 (DDD Layer/Technology Stack) · §16 (BOM)
@@ -45,7 +45,7 @@
 
 ## 3. Core abstraction and interface (core interfaces / type definition)
 
-The domain layer (§15.5.2 `domain/`) only defines **Port (interface)** and does not rely on specific Provider. The following is the Go contract (LLMProvider SPI version `1.0.0`, Gateway SPI version `1.2.0`).
+The domain layer (§15.5.2 `domain/`) only defines **Port (interface)** and does not rely on specific Provider. The following is the Go contract (LLMProvider SPI version `1.0.0`, Gateway SPI version `1.0.0`).
 
 ```go
 // ===== LLMProvider SPI（interface_versions.LLMProvider = 1.0.0）=====
@@ -141,7 +141,7 @@ type RateLimit struct {
 }
 ```
 
-`Gateway` SPI (version `1.2.0`) is exposed to the upper layer by the repository itself as an implementation. This repository does not rely on external `Gateway` instances (Higress is the data plane forwarding layer, see §6).
+`Gateway` SPI (version `1.0.0`) is exposed to the upper layer by the repository itself as an implementation. This repository does not rely on external `Gateway` instances (Higress is the data plane forwarding layer, see §6).
 
 ---
 
@@ -217,14 +217,14 @@ Perform PII detection and desensitization before calling the third party; if the
 | SPI port | Repository role | External component (from bom.yaml) | Default ✅ / Alternative | Adapter |
 | --- | --- | --- | --- | --- |
 | `LLMProvider` (1.0.0) | Consumer | Qwen/OpenAI/Claude (core) · Self-hosted vLLM/TGI (optional, phase four only) | ✅ / Alternative | `ThirdPartyAdapter` / `SelfHostedAdapter` |
-| `Gateway` (1.2.0) | Implementer | Higress (core, data plane) | ✅ | The data plane is forwarded by Higress, and the control logic is in this repository |
+| `Gateway` (1.0.0) | Implementer | Higress (core, data plane) | ✅ | The data plane is forwarded by Higress, and the control logic is in this repository |
 | `Auth` (1.0.0) | Consumer | Keycloak (core) | ✅ | `AuthAdapter` (JWT verification) |
 | `Cache` (1.0.0) | Consumer | Redis (core) / Valkey (optional, OSI alternative) | ✅ / Alternative | `CacheAdapter` |
 | `Tracing` (1.0.0) | Consumer | Langfuse (optional) / OTel (core) | ✅ / Alternative | `TracingAdapter` |
 
 - **Anti-Corruption Layer (ACL)**: All upstream Provider responses are normalized by the Adapter into internal `ChatResponse`/`ChatChunk`; Claude's messages format, Qwen's DashScope protocol, and OpenAI format are all converged within the Adapter (§4.4.5 "Unified Access and Protocol Normalization").
 - **Multiple implementations of the same type coexist**: `LLMProvider` can have multiple Adapters online at the same time, and `ModelRouter` routes by request/tenant (§10.4).
-- **SPI ports aligned with bom.yaml `interface_versions`**: `LLMProvider: 1.0.0`, `Gateway: 1.2.0` (conformance report D3 fixed `ModelGateway→Gateway`).
+- **SPI ports aligned with bom.yaml `interface_versions`**: `LLMProvider: 1.0.0`, `Gateway: 1.0.0` (conformance report D3 fixed `ModelGateway→Gateway`).
 
 ---
 

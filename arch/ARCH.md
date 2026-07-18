@@ -4,7 +4,7 @@
 > **Language · Framework**: Go · Hertz/go-zero (hot path) + Gin + Cobra + Wire (compile-time DI)
 > **Field**: runtime (model service layer/AI unified gateway)
 > **optional**: false (core · core required)
-> **Platform version**: v1.4.0
+> **Platform version**: v1.0.0
 
 ---
 
@@ -216,7 +216,7 @@ type RateLimit struct {
 | Metering/auditing | ≤5ms (asynchronous) | Does not block the main path |
 | **End-to-end p95** | **≤2000ms** | Consistent with §4.4.5 degradation threshold |
 
-### 3.6 Gateway SPI（v1.2.0）
+### 3.6 Gateway SPI（v1.0.0）
 
 `Gateway` SPI is exposed to the upper layer by the repository itself as an implementation. This repository does not rely on external `Gateway` instances - Higress is the data plane forwarding layer, not the SPI implementation.
 
@@ -229,7 +229,7 @@ type RateLimit struct {
 | SPI port | Version | Repository role | External component (bom.yaml) | Default | Alternative | Adapter implementation |
 | --- | --- | --- | --- | --- | --- | --- |
 | `LLMProvider` | 1.0.0 | Consumer | Qwen/OpenAI/Claude (core) · Self-hosted vLLM/TGI (optional) | ✅ | Alternative | `ThirdPartyAdapter` / `SelfHostedAdapter` |
-| `Gateway` | 1.2.0 | Implementer | Higress (core, data plane) | ✅ | — | The data plane is forwarded by Higress, and the control logic is in this repository |
+| `Gateway` | 1.0.0 | Implementer | Higress (core, data plane) | ✅ | — | The data plane is forwarded by Higress, and the control logic is in this repository |
 | `Auth` | 1.0.0 | Consumer | Keycloak (core) | ✅ | — | `AuthAdapter` (JWT local verification) |
 | `Cache` | 1.0.0 | Consumer | Redis (core) / Valkey (optional, OSI replacement) | ✅ | Alternative | `CacheAdapter` (Unified Cache Interface) |
 | `Tracing` | 1.0.0 | Consumer | Langfuse (optional) / OTel (core) | ✅ | Alternative | `TracingAdapter` |
@@ -288,7 +288,7 @@ Multiple Adapters can be online at the same time behind `LLMProvider` (§10.4):
 | Consistency report item | bom.yaml version | This repository implementation version | Status |
 | --- | --- | --- | --- |
 | `LLMProvider` | `1.0.0` | `1.0.0` | Alignment |
-| `Gateway` | `1.2.0` | `1.2.0` | Alignment (D3 fixed `ModelGateway→Gateway`) |
+| `Gateway` | `1.0.0` | `1.2.0` | Alignment (D3 fixed `ModelGateway→Gateway`) |
 | `Auth` | `1.0.0` | `1.0.0` | Alignment |
 | `Cache` | `1.0.0` | `1.0.0` | Alignment |
 | `Tracing` | `1.0.0` | `1.0.0` | Alignment |
