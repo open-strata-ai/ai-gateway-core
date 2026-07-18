@@ -6,6 +6,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/open-strata-ai/ai-gateway-core/application/breaker"
@@ -27,9 +28,12 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load("")
+	cfg, err := config.Load(os.Getenv("CONFIG_PATH"))
 	if err != nil {
 		log.Fatalf("config: %v", err)
+	}
+	if addr := os.Getenv("ADDR"); addr != "" {
+		cfg.Gateway.Listen = addr
 	}
 	h, closeFn := Bootstrap(cfg)
 	defer closeFn()
