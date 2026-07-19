@@ -136,13 +136,19 @@ func Bootstrap(cfg config.Config) (*httpapi.Handler, func()) {
 	authPort := auth.New("local")
 
 	// Batch B1: session / file-upload / content-security wiring (DESIGN §1.2).
+	// Batch E2: prefer MinIO (S3) object storage when configured; otherwise
+	// fall back to the in-memory stand-in for DEV/offline.
 	sec := security.New(scanner.New(scanner.Config{PIIScan: cfg.Egress.PIIScan}))
 	sessRepo := memory.NewSessionRepository()
 	agentCat := catalog.NewAgentInMemory()
+	var fileStore domain.FileStoragePort = storage.NewMemory()
+	if m := storage.NewMinIOFromEnv(); m != nil {
+		fileStore = m
+	}
 	sessionSvc := session.New(session.Deps{
 		Chat:     chatSvc,
 		Security: sec,
-		Storage:  storage.NewMemory(),
+		Storage:  fileStore,
 		Sessions: sessRepo,
 		Agents:   agentCat,
 		Tracer:   trc,
