@@ -81,3 +81,62 @@ type RiskController interface {
 	// request may have PII masked. denyEgress forces self-hosted-only routing.
 	Inspect(req ChatRequest, denyEgress bool) (out ChatRequest, ok bool, reason string)
 }
+
+// ContentSecurityService scans payloads for PII / injection before egress and
+// after ingress (Batch B1, EU-03 / EU-04 / DV-14, DESIGN §1.2, §4.2).
+type ContentSecurityService interface {
+	ScanInput(ctx context.Context, msg *Message) (*ScanResult, error)
+	ScanOutput(ctx context.Context, msg *Message) (*ScanResult, error)
+	ScanFile(ctx context.Context, file *FileRef) (*ScanResult, error)
+}
+
+// FileStoragePort abstracts object storage for file uploads (EU-03). The default
+// adapter is MinIO; a local-disk adapter is used for DEV/offline (DESIGN §6.2).
+type FileStoragePort interface {
+	Upload(ctx context.Context, file *FileUploadRequest) (*FileRef, error)
+	Download(ctx context.Context, ref *FileRef) ([]byte, error)
+	ScanContent(ctx context.Context, ref *FileRef) (*ScanResult, error)
+}
+
+// MemoryPort abstracts working + long-term memory (Redis + Qdrant/Milvus).
+type MemoryPort interface {
+	GetWorkingMemory(ctx context.Context, sessionID string) ([]Message, error)
+	UpdateWorkingMemory(ctx context.Context, sessionID string, msgs []Message) error
+	SearchLongTerm(ctx context.Context, query string, topK int) ([]MemoryEntry, error)
+}
+
+// MemoryEntry is a single long-term memory record returned by SearchLongTerm.
+type MemoryEntry struct {
+	SessionID string  `json:"session_id"`
+	Content   string  `json:"content"`
+	Score     float64 `json:"score"`
+}
+
+// ToolRegistryPort is the gateway-side view of ai-tool-registry (DV-14).
+type ToolRegistryPort interface {
+	ListTools(ctx context.Context, tenantID string) ([]ToolSpec, error)
+	ExecuteTool(ctx context.Context, toolID string, args map[string]any) (*ToolResult, error)
+}
+
+// ToolSpec describes a registered tool (DV-14).
+type ToolSpec struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Protocol    string `json:"protocol"` // stdio|sse|http (MCP)
+}
+
+// ToolResult is the outcome of a tool execution.
+type ToolResult struct {
+	ToolID  string `json:"tool_id"`
+	Output  string `json:"output"`
+	Ok      bool   `json:"ok"`
+	ErrText string `json:"error,omitempty"`
+}
+
+// AgentCatalog is the gateway-side read-only projection of published Agents
+// (EU-05). The authoritative source is ai-platform-api; the gateway caches a
+// lightweight list used by ListAvailableAgents.
+type AgentCatalog interface {
+	ListAvailable(tenantID string) []AgentSummary
+}

@@ -14,7 +14,12 @@ import (
 	"github.com/open-strata-ai/ai-gateway-core/application/ratelimit"
 	"github.com/open-strata-ai/ai-gateway-core/application/riskcontrol"
 	"github.com/open-strata-ai/ai-gateway-core/application/routing"
+	"github.com/open-strata-ai/ai-gateway-core/application/security"
+	"github.com/open-strata-ai/ai-gateway-core/application/session"
 	"github.com/open-strata-ai/ai-gateway-core/domain"
+	"github.com/open-strata-ai/ai-gateway-core/infrastructure/repository/memory"
+	"github.com/open-strata-ai/ai-gateway-core/infrastructure/scanner"
+	"github.com/open-strata-ai/ai-gateway-core/infrastructure/storage"
 	"github.com/open-strata-ai/ai-gateway-core/infrastructure/audit"
 	"github.com/open-strata-ai/ai-gateway-core/infrastructure/auth"
 	"github.com/open-strata-ai/ai-gateway-core/infrastructure/cache"
@@ -129,7 +134,21 @@ func Bootstrap(cfg config.Config) (*httpapi.Handler, func()) {
 	}, chat.Config{DenyEgressTenants: cfg.Egress.DenyEgressTenants})
 
 	authPort := auth.New("local")
-	handler := httpapi.New(chatSvc, cat, authPort)
+
+	// Batch B1: session / file-upload / content-security wiring (DESIGN §1.2).
+	sec := security.New(scanner.New(scanner.Config{PIIScan: cfg.Egress.PIIScan}))
+	sessRepo := memory.NewSessionRepository()
+	agentCat := catalog.NewAgentInMemory()
+	sessionSvc := session.New(session.Deps{
+		Chat:     chatSvc,
+		Security: sec,
+		Storage:  storage.NewMemory(),
+		Sessions: sessRepo,
+		Agents:   agentCat,
+		Tracer:   trc,
+	})
+
+	handler := httpapi.New(chatSvc, cat, authPort, sessionSvc, agentCat)
 	return handler, func() { rep.Close() }
 }
 
