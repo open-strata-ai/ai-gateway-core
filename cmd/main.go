@@ -14,7 +14,12 @@ import (
 	"github.com/open-strata-ai/ai-gateway-core/application/ratelimit"
 	"github.com/open-strata-ai/ai-gateway-core/application/riskcontrol"
 	"github.com/open-strata-ai/ai-gateway-core/application/routing"
+	"github.com/open-strata-ai/ai-gateway-core/application/security"
+	"github.com/open-strata-ai/ai-gateway-core/application/session"
 	"github.com/open-strata-ai/ai-gateway-core/domain"
+	"github.com/open-strata-ai/ai-gateway-core/infrastructure/repository/memory"
+	"github.com/open-strata-ai/ai-gateway-core/infrastructure/scanner"
+	"github.com/open-strata-ai/ai-gateway-core/infrastructure/storage"
 	"github.com/open-strata-ai/ai-gateway-core/infrastructure/audit"
 	"github.com/open-strata-ai/ai-gateway-core/infrastructure/auth"
 	"github.com/open-strata-ai/ai-gateway-core/infrastructure/cache"
@@ -52,7 +57,25 @@ func main() {
 // Bootstrap assembles the full object graph from config and returns the HTTP
 // handler plus a cleanup function. It is exported so tests can reuse the wiring.
 func Bootstrap(cfg config.Config) (*httpapi.Handler, func()) {
-	cat := catalog.NewWithCards(defaultCards()...)
+	pgDSN := os.Getenv("DATABASE_URL")
+	var cat domain.ModelCatalog
+	if pgDSN != "" {
+		pgcat, err := catalog.NewPostgres(pgDSN)
+		if err != nil {
+			log.Printf("WARN: falling back to in-memory catalog (%v)", err)
+			cat = catalog.NewWithCards(defaultCards()...)
+		} else {
+			cat = pgcat
+			// Seed default cards if catalog is empty
+			if cards := cat.ListByCapability("", ""); len(cards) == 0 {
+				for _, card := range defaultCards() {
+					cat.Upsert(card)
+				}
+			}
+		}
+	} else {
+		cat = catalog.NewWithCards(defaultCards()...)
+	}
 
 	reg := provider.NewRegistry()
 	for _, card := range defaultCards() {
@@ -82,7 +105,18 @@ func Bootstrap(cfg config.Config) (*httpapi.Handler, func()) {
 	})
 	risk := riskcontrol.New(riskcontrol.Config{PIIScan: cfg.Egress.PIIScan})
 	c := cache.New(cfg.Cache.Enabled)
-	aud := audit.New()
+	var aud domain.AuditRecorder
+	if pgDSN != "" {
+		pgaud, err := audit.NewPostgres(pgDSN)
+		if err != nil {
+			log.Printf("WARN: falling back to in-memory audit (%v)", err)
+			aud = audit.New()
+		} else {
+			aud = pgaud
+		}
+	} else {
+		aud = audit.New()
+	}
 	trc := tracing.New(false)
 	rep := appmetering.New(1024, metering.LogSink())
 
@@ -100,7 +134,27 @@ func Bootstrap(cfg config.Config) (*httpapi.Handler, func()) {
 	}, chat.Config{DenyEgressTenants: cfg.Egress.DenyEgressTenants})
 
 	authPort := auth.New("local")
-	handler := httpapi.New(chatSvc, cat, authPort)
+
+	// Batch B1: session / file-upload / content-security wiring (DESIGN §1.2).
+	// Batch E2: prefer MinIO (S3) object storage when configured; otherwise
+	// fall back to the in-memory stand-in for DEV/offline.
+	sec := security.New(scanner.New(scanner.Config{PIIScan: cfg.Egress.PIIScan}))
+	sessRepo := memory.NewSessionRepository()
+	agentCat := catalog.NewAgentInMemory()
+	var fileStore domain.FileStoragePort = storage.NewMemory()
+	if m := storage.NewMinIOFromEnv(); m != nil {
+		fileStore = m
+	}
+	sessionSvc := session.New(session.Deps{
+		Chat:     chatSvc,
+		Security: sec,
+		Storage:  fileStore,
+		Sessions: sessRepo,
+		Agents:   agentCat,
+		Tracer:   trc,
+	})
+
+	handler := httpapi.New(chatSvc, cat, authPort, sessionSvc, agentCat)
 	return handler, func() { rep.Close() }
 }
 
