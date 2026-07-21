@@ -58,6 +58,85 @@ type OpenSessionRequest struct {
 	AgentID  string `json:"agent_id"`
 }
 
+// ModelBinding ties an Agent to a concrete upstream model (DESIGN §4.3.5).
+type ModelBinding struct {
+	Model    string `json:"model"`
+	Provider string `json:"provider"`
+}
+
+// StateNode / Transition / StateMachine describe a declarative agent behaviour
+// graph (DESIGN §4.3.5). They mirror the portal's AgentSpec contract.
+type StateNode struct {
+	ID   string `json:"id"`
+	Label string `json:"label"`
+	Type string `json:"type"` // start|end|normal
+}
+
+type Transition struct {
+	From  string `json:"from"`
+	To    string `json:"to"`
+	Event string `json:"event"`
+}
+
+type StateMachine struct {
+	Initial     string        `json:"initial"`
+	States      []StateNode  `json:"states"`
+	Transitions []Transition `json:"transitions"`
+}
+
+// Guardrail is a single safety rule attached to an Agent.
+type Guardrail struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"` // injection|pii|rate-limit|custom
+	Description string `json:"description"`
+}
+
+// AgentSpec is a user-authored agent definition persisted by the gateway
+// (EU-05 authoring). It is the writable counterpart of the read-only
+// AgentSummary catalog projection. Wire tags are camelCase to match the
+// portal AgentSpec contract 1:1.
+type AgentSpec struct {
+	ID           string        `json:"id"`
+	TenantID     string        `json:"tenantId"`
+	Name         string        `json:"name"`
+	Description  string        `json:"description"`
+	ModelBinding *ModelBinding `json:"modelBinding,omitempty"`
+	StateMachine *StateMachine `json:"stateMachine,omitempty"`
+	Guardrails   []Guardrail   `json:"guardrails,omitempty"`
+	Status       string        `json:"status"` // draft|published|deprecated
+	CreatedAt    int64         `json:"createdAt"`
+	UpdatedAt    int64         `json:"updatedAt"`
+}
+
+// AgentRepository persists user-authored AgentSpecs (DESIGN §8: agent table).
+// The production adapter is PostgreSQL; the offline stand-in is in-memory.
+type AgentRepository interface {
+	Save(a AgentSpec) error
+	Get(id string) (AgentSpec, bool)
+	List(tenantID string) []AgentSpec
+	Delete(id string) error
+}
+
+// CreateAgentRequest is the payload for authoring a new AgentSpec.
+type CreateAgentRequest struct {
+	TenantID    string
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	ModelBinding *ModelBinding `json:"modelBinding,omitempty"`
+	StateMachine *StateMachine `json:"stateMachine,omitempty"`
+	Guardrails  []Guardrail    `json:"guardrails,omitempty"`
+}
+
+// UpdateAgentRequest carries editable fields for an existing AgentSpec.
+type UpdateAgentRequest struct {
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	ModelBinding *ModelBinding `json:"modelBinding,omitempty"`
+	StateMachine *StateMachine `json:"stateMachine,omitempty"`
+	Guardrails   []Guardrail    `json:"guardrails,omitempty"`
+	Status       string         `json:"status"`
+}
+
 // FileUploadRequest carries an inbound multipart upload in normalized form.
 type FileUploadRequest struct {
 	TenantID    string

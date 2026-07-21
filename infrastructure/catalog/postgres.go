@@ -74,7 +74,10 @@ func (p *Postgres) Get(modelID string) (domain.ModelCard, bool) {
 }
 
 func (p *Postgres) ListByCapability(capability, tenantID string) []domain.ModelCard {
-	rows, err := p.db.Query(`SELECT model_id,source,capability,context_window,price_in,price_out,latency_sla_ms,tps,rate_limit,health,tenant_access FROM model_catalog WHERE capability=$1 AND ($2='' OR $2=ANY(tenant_access)) ORDER BY model_id`, capability, tenantID)
+	// A card with empty tenant_access is global (visible to every tenant). The
+	// seeded default catalog uses empty access, so treat that as "available to
+	// all" rather than "visible to no one" (RC-5).
+	rows, err := p.db.Query(`SELECT model_id,source,capability,context_window,price_in,price_out,latency_sla_ms,tps,rate_limit,health,tenant_access FROM model_catalog WHERE capability=$1 AND ($2='' OR $2=ANY(tenant_access) OR cardinality(tenant_access)=0) ORDER BY model_id`, capability, tenantID)
 	if err != nil {
 		return nil
 	}
