@@ -42,7 +42,7 @@ func newServer() *httpapi.Handler {
 		Cache:     cache.New(false),
 		Providers: reg,
 	}, chat.Config{})
-	return httpapi.New(svc, cat, auth.New("local"), nil, nil)
+	return httpapi.New(svc, cat, auth.New("local"), nil, nil, nil)
 }
 
 func TestHTTP_ChatCompletions(t *testing.T) {
@@ -81,7 +81,7 @@ func TestHTTP_MissingTenantUnauthorized(t *testing.T) {
 	// auth stub with no dev tenant → 401
 	cat := catalog.New()
 	svc := chat.New(chat.Deps{Router: routing.New(cat, routing.Config{}), Catalog: cat, Providers: provider.NewRegistry()}, chat.Config{})
-	h := httpapi.New(svc, cat, auth.New(""), nil, nil)
+	h := httpapi.New(svc, cat, auth.New(""), nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
@@ -149,13 +149,14 @@ func newServerWithSession() *httpapi.Handler {
 	agents := catalog.NewAgentInMemory()
 	agents.Put(domain.AgentSummary{ID: "a1", Name: "Helper", Status: "published"})
 	sessionSvc := session.New(session.Deps{
-		Chat:     svc,
-		Security: security.New(scanner.New(scanner.Config{PIIScan: true})),
-		Storage:  storage.NewMemory(),
-		Sessions: sessRepo,
-		Agents:   agents,
+		Chat:      svc,
+		Security:  security.New(scanner.New(scanner.Config{PIIScan: true})),
+		Storage:   storage.NewMemory(),
+		Sessions:  sessRepo,
+		Agents:    agents,
+		AgentRepo: memory.NewAgentRepository(),
 	})
-	return httpapi.New(svc, cat, auth.New("local"), sessionSvc, agents)
+	return httpapi.New(svc, cat, auth.New("local"), sessionSvc, agents, memory.NewAgentRepository())
 }
 
 func TestHTTP_OpenSession(t *testing.T) {
@@ -233,5 +234,80 @@ func TestHTTP_ListAgents(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "a1") {
 		t.Fatalf("expected agent a1 in list, got %s", rec.Body.String())
+	}
+}
+
+func TestHTTP_AgentCRUD(t *testing.T) {
+	h := newServerWithSession()
+	const tenant = "t1"
+
+	// 1) create a user-authored agent
+	createBody := `{"name":"My Agent","description":"does things","modelBinding":{"model":"cloud-qwen-max","provider":"alibaba"}}`
+	creq := httptest.NewRequest(http.MethodPost, "/v1/agents", strings.NewReader(createBody))
+	creq.Header.Set("X-Tenant-Id", tenant)
+	crec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(crec, creq)
+	if crec.Code != http.StatusCreated {
+		t.Fatalf("create: want 201, got %d body=%s", crec.Code, crec.Body.String())
+	}
+	var created domain.AgentSpec
+	if err := json.Unmarshal(crec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("create: bad json: %v", err)
+	}
+	if created.ID == "" || created.Name != "My Agent" || created.Status != "draft" {
+		t.Fatalf("create: unexpected spec %+v", created)
+	}
+
+	// 2) list includes the newly created agent
+	lreq := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
+	lreq.Header.Set("X-Tenant-Id", tenant)
+	lrec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(lrec, lreq)
+	if lrec.Code != http.StatusOK {
+		t.Fatalf("list: want 200, got %d", lrec.Code)
+	}
+	if !strings.Contains(lrec.Body.String(), created.ID) {
+		t.Fatalf("list: created agent %s missing, got %s", created.ID, lrec.Body.String())
+	}
+
+	// 3) get by id
+	greq := httptest.NewRequest(http.MethodGet, "/v1/agents/"+created.ID, nil)
+	greq.Header.Set("X-Tenant-Id", tenant)
+	grec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(grec, greq)
+	if grec.Code != http.StatusOK {
+		t.Fatalf("get: want 200, got %d body=%s", grec.Code, grec.Body.String())
+	}
+
+	// 4) patch (rename + publish)
+	preq := httptest.NewRequest(http.MethodPatch, "/v1/agents/"+created.ID, strings.NewReader(`{"name":"Renamed","status":"published"}`))
+	preq.Header.Set("X-Tenant-Id", tenant)
+	prec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(prec, preq)
+	if prec.Code != http.StatusOK {
+		t.Fatalf("patch: want 200, got %d body=%s", prec.Code, prec.Body.String())
+	}
+	var patched domain.AgentSpec
+	_ = json.Unmarshal(prec.Body.Bytes(), &patched)
+	if patched.Name != "Renamed" || patched.Status != "published" {
+		t.Fatalf("patch: unexpected %+v", patched)
+	}
+
+	// 5) delete
+	dreq := httptest.NewRequest(http.MethodDelete, "/v1/agents/"+created.ID, nil)
+	dreq.Header.Set("X-Tenant-Id", tenant)
+	drec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(drec, dreq)
+	if drec.Code != http.StatusNoContent {
+		t.Fatalf("delete: want 204, got %d", drec.Code)
+	}
+
+	// 6) get after delete → 404 (not found)
+	greq2 := httptest.NewRequest(http.MethodGet, "/v1/agents/"+created.ID, nil)
+	greq2.Header.Set("X-Tenant-Id", tenant)
+	grec2 := httptest.NewRecorder()
+	h.Routes().ServeHTTP(grec2, greq2)
+	if grec2.Code != http.StatusNotFound {
+		t.Fatalf("get-after-delete: want 404, got %d", grec2.Code)
 	}
 }

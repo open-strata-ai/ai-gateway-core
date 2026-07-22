@@ -20,21 +20,30 @@ type ChatSessionAppService interface {
 	UploadFile(ctx context.Context, req *domain.FileUploadRequest) (*domain.FileRef, error)
 	GetChatHistory(ctx context.Context, sessionID string) ([]domain.Message, error)
 	ListAvailableAgents(ctx context.Context, tenantID string) ([]domain.AgentSummary, error)
+	// EU-05 authoring: persist + read user-authored AgentSpecs.
+	CreateAgent(ctx context.Context, req *domain.CreateAgentRequest) (*domain.AgentSpec, error)
+	GetAgent(ctx context.Context, id string) (*domain.AgentSpec, error)
+	ListAgents(ctx context.Context, tenantID string) ([]domain.AgentSpec, error)
+	UpdateAgent(ctx context.Context, id string, req *domain.UpdateAgentRequest) (*domain.AgentSpec, error)
+	DeleteAgent(ctx context.Context, id string) error
 }
 
 // SendMessageRequest carries a single turn for an open session.
 type SendMessageRequest struct {
 	SessionID string
 	Message   domain.Message
+	// Model is optional; when empty the gateway router uses the tenant default.
+	Model string
 }
 
 // Deps are the collaborators of the session Service.
 type Deps struct {
-	Chat    *chat.Service
+	Chat     *chat.Service
 	Security domain.ContentSecurityService
 	Storage  domain.FileStoragePort
 	Sessions domain.SessionRepository
 	Agents   domain.AgentCatalog
+	AgentRepo domain.AgentRepository
 	Tracer   domain.TracingPort
 }
 
@@ -101,6 +110,7 @@ func (s *Service) SendMessage(ctx context.Context, req *SendMessageRequest) (<-c
 	// 3) route through the existing chat pipeline (risk→cache→route→quota→provider)
 	chatReq := domain.ChatRequest{
 		TenantID:   sess.TenantID,
+		Model:      req.Model,
 		Capability: domain.CapChat,
 		Messages:   sess.Messages,
 	}
@@ -165,6 +175,101 @@ func (s *Service) ListAvailableAgents(ctx context.Context, tenantID string) ([]d
 		return nil, nil
 	}
 	return s.d.Agents.ListAvailable(tenantID), nil
+}
+
+// CreateAgent persists a new user-authored AgentSpec (EU-05 authoring).
+func (s *Service) CreateAgent(ctx context.Context, req *domain.CreateAgentRequest) (*domain.AgentSpec, error) {
+	if s.d.AgentRepo == nil {
+		return nil, domain.NewError(domain.ErrInvalidRequest, 404, "agent repository not configured")
+	}
+	if req.TenantID == "" {
+		return nil, domain.NewError(domain.ErrInvalidRequest, 400, "tenant_id is required")
+	}
+	if req.Name == "" {
+		return nil, domain.NewError(domain.ErrInvalidRequest, 400, "agent name is required")
+	}
+	now := s.now().Unix()
+	spec := domain.AgentSpec{
+		ID:           s.gen(),
+		TenantID:     req.TenantID,
+		Name:          req.Name,
+		Description:  req.Description,
+		ModelBinding: req.ModelBinding,
+		StateMachine: req.StateMachine,
+		Guardrails:   req.Guardrails,
+		Status:       "draft",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	if err := s.d.AgentRepo.Save(spec); err != nil {
+		return nil, err
+	}
+	return &spec, nil
+}
+
+// GetAgent returns a single AgentSpec by id (user repo first, then catalog).
+func (s *Service) GetAgent(ctx context.Context, id string) (*domain.AgentSpec, error) {
+	if s.d.AgentRepo != nil {
+		if a, ok := s.d.AgentRepo.Get(id); ok {
+			return &a, nil
+		}
+	}
+	if s.d.Agents != nil {
+		for _, sum := range s.d.Agents.ListAvailable("") {
+			if sum.ID == id {
+				return &domain.AgentSpec{
+					ID:          sum.ID,
+					Name:        sum.Name,
+					Description: sum.Description,
+					Status:      sum.Status,
+				}, nil
+			}
+		}
+	}
+	return nil, domain.NewError(domain.ErrInvalidRequest, 404, "agent not found")
+}
+
+// ListAgents returns the tenant's persisted AgentSpecs (EU-05 authoring list).
+func (s *Service) ListAgents(ctx context.Context, tenantID string) ([]domain.AgentSpec, error) {
+	if s.d.AgentRepo == nil {
+		return nil, nil
+	}
+	return s.d.AgentRepo.List(tenantID), nil
+}
+
+// UpdateAgent applies editable fields to an existing AgentSpec.
+func (s *Service) UpdateAgent(ctx context.Context, id string, req *domain.UpdateAgentRequest) (*domain.AgentSpec, error) {
+	if s.d.AgentRepo == nil {
+		return nil, domain.NewError(domain.ErrInvalidRequest, 404, "agent not found")
+	}
+	existing, ok := s.d.AgentRepo.Get(id)
+	if !ok {
+		return nil, domain.NewError(domain.ErrInvalidRequest, 404, "agent not found")
+	}
+	existing.Name = req.Name
+	existing.Description = req.Description
+	existing.ModelBinding = req.ModelBinding
+	existing.StateMachine = req.StateMachine
+	existing.Guardrails = req.Guardrails
+	if req.Status != "" {
+		existing.Status = req.Status
+	}
+	existing.UpdatedAt = s.now().Unix()
+	if err := s.d.AgentRepo.Save(existing); err != nil {
+		return nil, err
+	}
+	return &existing, nil
+}
+
+// DeleteAgent removes a persisted AgentSpec.
+func (s *Service) DeleteAgent(ctx context.Context, id string) error {
+	if s.d.AgentRepo == nil {
+		return domain.NewError(domain.ErrInvalidRequest, 404, "agent not found")
+	}
+	if _, ok := s.d.AgentRepo.Get(id); !ok {
+		return domain.NewError(domain.ErrInvalidRequest, 404, "agent not found")
+	}
+	return s.d.AgentRepo.Delete(id)
 }
 
 var _ ChatSessionAppService = (*Service)(nil)
